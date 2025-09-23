@@ -1,34 +1,53 @@
 import os
+
+
 import pandas as pd
 
 def load_forex_csv(path: str, tz: str = "UTC") -> pd.DataFrame:
     """
-    Load EURUSD data. Expected columns (case-insensitive at load):
-    ['timestamp','open','high','low','close','volume'] or a DatetimeIndex.
+    Load FX OHLCV CSV and return a DataFrame with a unique, sorted DatetimeIndex.
+    - Accepts either a 'timestamp' column or an existing DatetimeIndex.
+    - Normalizes columns to lower-case: open, high, low, close, volume (if present).
+    - Ensures strictly increasing, unique index (drops duplicate timestamps, keep='last').
     """
     df = pd.read_csv(path)
-    if 'timestamp' in {c.lower() for c in df.columns}:
-        ts_col = [c for c in df.columns if c.lower() == 'timestamp'][0]
-        df[ts_col] = pd.to_datetime(df[ts_col], utc=True).dt.tz_convert(tz)
-        df = df.set_index(ts_col).sort_index()
-    else:
-        # assume index-like time already present
-        if not isinstance(df.index, pd.DatetimeIndex):
-            raise ValueError("Provide a timestamp column or DatetimeIndex.")
-        df.index = df.index.tz_convert(tz) if df.index.tz is not None else df.index.tz_localize(tz)
-        df = df.sort_index()
 
-    # normalize column names
+    # Use timestamp column if present (case-insensitive), else assume DatetimeIndex
+    cols_lower = {c.lower(): c for c in df.columns}
+    if "timestamp" in cols_lower:
+        ts_col = cols_lower["timestamp"]
+        df[ts_col] = pd.to_datetime(df[ts_col], utc=True)
+        if tz and tz.upper() != "UTC":
+            df[ts_col] = df[ts_col].dt.tz_convert(tz)
+        df = df.set_index(ts_col)
+    else:
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError("Provide a 'timestamp' column or a DatetimeIndex in the CSV.")
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        if tz and tz.upper() != "UTC":
+            df.index = df.index.tz_convert(tz)
+
+    # normalize column names to lower-case
     ren = {}
     for c in df.columns:
         cl = c.lower()
-        if cl in ('open','high','low','close','volume'):
+        if cl in ("open", "high", "low", "close", "volume"):
             ren[c] = cl
     df = df.rename(columns=ren)
 
-    needed = {'open','high','low','close'}
-    if not needed.issubset(set(df.columns.str.lower())):
-        raise ValueError(f"Missing columns: {needed - set(df.columns.str.lower())}")
+    # basic sanity
+    needed = {"open", "high", "low", "close"}
+    have = set(c.lower() for c in df.columns)
+    if not needed.issubset(have):
+        raise ValueError(f"Missing columns: {sorted(needed - have)}")
 
-    df = df.dropna().copy()
+    # sort and drop duplicate timestamps (keep the last occurrence)
+    df = df.sort_index()
+    if df.index.has_duplicates:
+        df = df[~df.index.duplicated(keep="last")]
+
+    # drop obvious NaNs
+    df = df.dropna(subset=["open", "high", "low", "close"])
+
     return df

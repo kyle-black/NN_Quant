@@ -12,7 +12,7 @@ def _wilder_rma(s: pd.Series, length: int) -> pd.Series:
     # Wilder's "RMA" via ewm with alpha=1/length
     return s.ewm(alpha=1.0/length, adjust=False).mean()
 
-def _rsi_wilder(close: pd.Series, length: int = 14) -> pd.Series:
+def _rsi_wilder(close: pd.Series, length: int = 336) -> pd.Series:
     delta = close.diff()
     gain = delta.clip(lower=0.0)
     loss = -delta.clip(upper=0.0)
@@ -22,7 +22,7 @@ def _rsi_wilder(close: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi
 
-def _macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
+def _macd(close: pd.Series, fast: int = 720, slow: int = 1560, signal: int = 9) -> pd.DataFrame:
     ema_fast = _ema(close, fast)
     ema_slow = _ema(close, slow)
     macd_line = ema_fast - ema_slow
@@ -34,7 +34,7 @@ def _macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> 
         "macd_hist": hist
     })
 
-def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 14) -> pd.Series:
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 336) -> pd.Series:
     prev_close = close.shift(1)
     tr1 = (high - low).abs()
     tr2 = (high - prev_close).abs()
@@ -53,24 +53,24 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     # --- Base returns / stats ---
     out['ret_1'] = np.log(out['close']).diff()
 
-    for w in (5, 10, 20):
+    for w in (120, 240, 480):
         out[f'roll_mean_{w}'] = out['ret_1'].rolling(w, min_periods=w).mean()
         out[f'roll_std_{w}']  = out['ret_1'].rolling(w, min_periods=w).std()
 
-    for k in (2, 5, 10):
+    for k in (48, 120, 240):
         out[f'mom_{k}'] = out['close'].pct_change(k)
 
     # --- RSI (Wilder) ---
     out['rsi_14'] = _rsi_wilder(out['close'], length=14)
 
     # --- MACD (12,26,9) ---
-    macd_df = _macd(out['close'], fast=12, slow=26, signal=9)
+    macd_df = _macd(out['close'], fast=288, slow=624, signal=216)
     out = out.join(macd_df)
 
     # --- ATR (14) ---
     if not {'high','low','close'}.issubset({c.lower() for c in out.columns}):
         raise ValueError("ATR requires 'high','low','close' columns.")
-    out['atr_14'] = _atr(out['high'], out['low'], out['close'], length=14)
+    out['atr_14'] = _atr(out['high'], out['low'], out['close'], length=336)
 
     # Drop warmup NaNs created by rolling/ewm; keep only fully-formed rows
     out = out.dropna().copy()

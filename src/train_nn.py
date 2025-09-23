@@ -27,7 +27,7 @@ def train_eurusd(
     df = load_forex_csv(data_path)
     df_feat = add_basic_features(df)
    # y = make_direction_label(df_feat, horizon=horizon, thr=thr)
-    y = make_direction_label_barrier_first_touch(df_feat, horizon=128, atr_mult=1, atr_col="atr_14")  # or "ATR_14")
+    y = make_direction_label_barrier_first_touch(df_feat, horizon=336, atr_mult=0.5, atr_col="atr_14")  # or "ATR_14")
 
 
     X, y = build_Xy(df_feat, y)
@@ -103,13 +103,14 @@ if __name__ == "__main__":
     '''
 
     data_path='data/EURUSD_1h_2005-01-01_to_2025-09-23.csv'
-    horizon = 14
+    horizon = 336
     thr =0.005
     splits = 5
     test_size = 0.20
-    epochs =20
-    batch_size= 128
+    epochs =5
+    batch_size= 256
     out = "models/eurusd_nn"
+    models_dir="models/eurusd_nn"
     
     
     
