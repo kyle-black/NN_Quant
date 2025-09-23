@@ -102,9 +102,9 @@ if __name__ == "__main__":
     horizon = 20
     thr =0.005
     splits = 5
-    test_size = 0.30
+    test_size = 0.20
     epochs =10
-    batch_size= 256
+    batch_size= 128
     out = "models/eurusd_nn"
     
     
