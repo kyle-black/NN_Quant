@@ -1,4 +1,4 @@
-0
+feature
 ret_1
 roll_mean_5
 roll_std_5
@@ -10,3 +10,7 @@ mom_2
 mom_5
 mom_10
 rsi_14
+macd
+macd_signal
+macd_hist
+atr_14

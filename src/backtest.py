@@ -10,7 +10,7 @@ def softmax_to_dir(probs: np.ndarray) -> np.ndarray:
     mapping = {0: -1, 1: 0, 2: +1}
     return np.vectorize(mapping.get)(idx)
 
-def pnl_from_signals(close: pd.Series, signals: pd.Series, one_way_cost_bp: float = 0.5) -> Dict[str, Any]:
+def pnl_from_signals(close: pd.Series, signals: pd.Series, one_way_cost_bp: float = 0.0) -> Dict[str, Any]:
     """
     Toy PnL: daily ret * signal with basic cost on changes.
     Costs modeled in basis points per trade side.

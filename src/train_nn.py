@@ -71,7 +71,9 @@ def train_eurusd(
 
         # save each fold’s best model and the feature order
         model.save(os.path.join(out_dir, f"fold_{fold}.keras"))
-        X.columns.to_series().to_csv(os.path.join(out_dir, f"fold_{fold}_feature_order.csv"), index=False)
+        #X.columns.to_series().to_csv(os.path.join(out_dir, f"fold_{fold}_feature_order.csv"), index=False)
+        feat_csv = os.path.join(out_dir, f"fold_{fold}_feature_order.csv")
+        pd.Series(list(X.columns), name="feature").to_csv(feat_csv, index=False)
 
     return {
         "folds": metrics,
@@ -97,11 +99,11 @@ if __name__ == "__main__":
     '''
 
     data_path='data/EURUSD_1h_2005-01-01_to_2025-09-23.csv'
-    horizon = 5
-    thr =0.0
+    horizon = 20
+    thr =0.005
     splits = 5
     test_size = 0.20
-    epochs =100
+    epochs =10
     batch_size= 256
     out = "models/eurusd_nn"
     
