@@ -6,10 +6,11 @@ from tensorflow import keras
 
 from data_io import load_forex_csv
 from features import add_basic_features
-from labels import make_direction_label
+#from labels import make_direction_label
 from timesplit import time_series_split
 from pipelines import RollingScaler, build_Xy
 from model_keras import make_classifier
+from labels import make_direction_label_barrier_first_touch 
 
 def train_eurusd(
     data_path: str,
@@ -25,7 +26,9 @@ def train_eurusd(
     os.makedirs(out_dir, exist_ok=True)
     df = load_forex_csv(data_path)
     df_feat = add_basic_features(df)
-    y = make_direction_label(df_feat, horizon=horizon, thr=thr)
+   # y = make_direction_label(df_feat, horizon=horizon, thr=thr)
+    y = make_direction_label_barrier_first_touch(df_feat, horizon=128, atr_mult=1, atr_col="atr_14")  # or "ATR_14")
+
 
     X, y = build_Xy(df_feat, y)
     X_np = X.values  # keep columns order
@@ -96,14 +99,15 @@ if __name__ == "__main__":
     p.add_argument("--batch_size", type=int, default=256)
     p.add_argument("--out", default="models/eurusd_nn")
     args = p.parse_args()
+    Pip Value = (0.0001 / Exchange Rate) * Lot Size
     '''
 
     data_path='data/EURUSD_1h_2005-01-01_to_2025-09-23.csv'
-    horizon = 20
+    horizon = 14
     thr =0.005
     splits = 5
     test_size = 0.20
-    epochs =10
+    epochs =20
     batch_size= 128
     out = "models/eurusd_nn"
     
