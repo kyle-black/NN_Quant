@@ -1,77 +1,67 @@
 import numpy as np
 import pandas as pd
 
-import numpy as np
-import pandas as pd
-
-def _ema(s: pd.Series, span: int) -> pd.Series:
-    # Exponential moving average (no lookahead)
-    return s.ewm(span=span, adjust=False).mean()
-
-def _wilder_rma(s: pd.Series, length: int) -> pd.Series:
-    # Wilder's "RMA" via ewm with alpha=1/length
-    return s.ewm(alpha=1.0/length, adjust=False).mean()
-
-def _rsi_wilder(close: pd.Series, length: int = 336) -> pd.Series:
-    delta = close.diff()
-    gain = delta.clip(lower=0.0)
-    loss = -delta.clip(upper=0.0)
-    avg_gain = _wilder_rma(gain, length)
-    avg_loss = _wilder_rma(loss, length)
-    rs = avg_gain / (avg_loss.replace(0.0, np.nan))
-    rsi = 100.0 - (100.0 / (1.0 + rs))
-    return rsi
-
-def _macd(close: pd.Series, fast: int = 720, slow: int = 1560, signal: int = 9) -> pd.DataFrame:
-    ema_fast = _ema(close, fast)
-    ema_slow = _ema(close, slow)
-    macd_line = ema_fast - ema_slow
-    signal_line = _ema(macd_line, signal)
-    hist = macd_line - signal_line
-    return pd.DataFrame({
-        "macd": macd_line,
-        "macd_signal": signal_line,
-        "macd_hist": hist
-    })
-
-def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 336) -> pd.Series:
-    prev_close = close.shift(1)
-    tr1 = (high - low).abs()
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = _wilder_rma(tr, length)
-    return atr
+def _ema(x: pd.Series, span: int) -> pd.Series:
+    return x.ewm(span=span, adjust=False).mean()
 
 def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Backward-looking features only (no future info).
-    Requires columns: 'close' (for all), and 'high','low' for ATR.
+    Backward-only features on 1h bars + a D1 ATR we can use for day-scale barriers.
+    Requires columns: open, high, low, close (case-insensitive).
     """
     out = df.copy()
+    # normalize cols
+    colmap = {c.lower(): c for c in out.columns}
+    for k in ("open","high","low","close"):
+        if k not in colmap: raise KeyError(f"Missing column '{k}' in data")
+    O,H,L,C = [colmap[x] for x in ("open","high","low","close")]
 
-    # --- Base returns / stats ---
-    out['ret_1'] = np.log(out['close']).diff()
+    # 1h log return
+    out["ret_1"] = np.log(out[C]).diff()
 
-    for w in (120, 240, 480):
-        out[f'roll_mean_{w}'] = out['ret_1'].rolling(w, min_periods=w).mean()
-        out[f'roll_std_{w}']  = out['ret_1'].rolling(w, min_periods=w).std()
+    # Rolling stats on 1h
+    for w in (5,10,20,50,100):
+        out[f"roll_mean_{w}"] = out["ret_1"].rolling(w, min_periods=w).mean()
+        out[f"roll_std_{w}"]  = out["ret_1"].rolling(w, min_periods=w).std()
 
-    for k in (48, 120, 240):
-        out[f'mom_{k}'] = out['close'].pct_change(k)
+    # Momentum windows
+    for k in (2,5,10,24):
+        out[f"mom_{k}"] = out[C].pct_change(k)
 
-    # --- RSI (Wilder) ---
-    out['rsi_14'] = _rsi_wilder(out['close'], length=14)
+    # RSI(14) (Wilder)
+    delta = out[C].diff()
+    up = delta.clip(lower=0); down = -delta.clip(upper=0)
+    roll_up = up.rolling(14, min_periods=14).mean()
+    roll_dn = down.rolling(14, min_periods=14).mean()
+    rs = roll_up / roll_dn.replace(0, np.nan)
+    out["rsi_14"] = 100 - (100 / (1 + rs))
 
-    # --- MACD (12,26,9) ---
-    macd_df = _macd(out['close'], fast=288, slow=624, signal=216)
-    out = out.join(macd_df)
+    # MACD(12,26,9)
+    ema12 = _ema(out[C], 12); ema26 = _ema(out[C], 26)
+    macd = ema12 - ema26
+    signal = _ema(macd, 9)
+    out["macd"] = macd; out["macd_signal"] = signal; out["macd_hist"] = macd - signal
 
-    # --- ATR (14) ---
-    if not {'high','low','close'}.issubset({c.lower() for c in out.columns}):
-        raise ValueError("ATR requires 'high','low','close' columns.")
-    out['atr_14'] = _atr(out['high'], out['low'], out['close'], length=336)
+    # ATR(14) on 1h (Wilder-like using rolling mean of TR)
+    prev_close = out[C].shift(1)
+    tr1 = (out[H] - out[L]).abs()
+    tr2 = (out[H] - prev_close).abs()
+    tr3 = (out[L] - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    out["atr_14"] = tr.rolling(14, min_periods=14).mean()
 
-    # Drop warmup NaNs created by rolling/ewm; keep only fully-formed rows
+    # ---- NEW: Daily ATR(14) (computed on resampled D1 bars) ----
+    d1 = out[[O,H,L,C]].resample("1D").agg({O:"first", H:"max", L:"min", C:"last"}).dropna()
+    prev_close_d1 = d1[C].shift(1)
+    tr_d1 = pd.concat([
+        (d1[H]-d1[L]).abs(),
+        (d1[H]-prev_close_d1).abs(),
+        (d1[L]-prev_close_d1).abs()
+    ], axis=1).max(axis=1)
+    atr_d1_14 = tr_d1.rolling(14, min_periods=14).mean()
+    # bring back to 1h index (forward-fill today’s ATR across the day)
+    out["atr_d1_14"] = atr_d1_14.reindex(out.index, method="ffill")
+
+    # Drop feature warmup rows
     out = out.dropna().copy()
     return out

@@ -10,7 +10,7 @@ from features import add_basic_features
 from timesplit import time_series_split
 from pipelines import RollingScaler, build_Xy
 from model_keras import make_classifier
-from labels import make_direction_label_barrier_first_touch 
+from labels import make_direction_label_barrier_first_touch_days 
 
 def train_eurusd(
     data_path: str,
@@ -27,10 +27,13 @@ def train_eurusd(
     df = load_forex_csv(data_path)
     df_feat = add_basic_features(df)
    # y = make_direction_label(df_feat, horizon=horizon, thr=thr)
-    y = make_direction_label_barrier_first_touch(df_feat, horizon=336, atr_mult=0.5, atr_col="atr_14")  # or "ATR_14")
-
-
+   # y = make_direction_label_barrier_first_touch_days(df_feat, atr_mult=0.5, atr_col="atr_14")  # or "ATR_14")
+    y = make_direction_label_barrier_first_touch_days(
+    df_feat, days_ahead=14, atr_mult=2.0, use_daily_atr=True
+)
     X, y = build_Xy(df_feat, y)
+
+    #X, y = build_Xy(df_feat, y)
     X_np = X.values  # keep columns order
 
     metrics = []
@@ -102,13 +105,13 @@ if __name__ == "__main__":
     Pip Value = (0.0001 / Exchange Rate) * Lot Size
     '''
 
-    data_path='data/EURUSD_1h_2005-01-01_to_2025-09-23.csv'
-    horizon = 336
+    data_path='data/EURUSD_eod_2000_to_today.csv'
+    horizon = 14
     thr =0.005
     splits = 5
     test_size = 0.20
-    epochs =5
-    batch_size= 256
+    epochs =50
+    batch_size= 512
     out = "models/eurusd_nn"
     models_dir="models/eurusd_nn"
     

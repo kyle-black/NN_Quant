@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import numpy as np
 import pandas as pd
@@ -13,13 +14,21 @@ from backtest import (
     summarize_trades,
 )
 
+# =========================
+# HARD-CODED PARAMETERS
+# =========================
+DATA_PATH   = "data/EURUSD_eod_2000_to_today.csv"
+MODELS_DIR  = "models/eurusd_nn"        # folder with fold_*.keras + fold_*_feature_order.csv
+PMIN        = 0.00                    # min prob to act
+MARGIN      = 0.01                     # min edge over 2nd-best class (None to disable)
+COST_BP     = 0.0                       # one-way cost in basis points
+HOLD_DAYS   = None                        # None for no time-exit; integer N => force exit after 24*N bars
+BARRIER_DATR_MULT = 1.0                 # None to disable triple-barrier; else k * daily ATR at entry
+EXPORT_TRADES_CSV = "trades_eurusd_pred.csv"  # output trades CSV (set None to skip writing)
+# =========================
+
 
 def _load_feature_cols(feat_path: str) -> list[str]:
-    """
-    Load saved feature order. Supports:
-    - New format: single column with header 'feature'
-    - Old format: headerless single column
-    """
     try:
         return (
             pd.read_csv(feat_path)["feature"]
@@ -44,23 +53,11 @@ def predict_and_backtest(
     pmin: float = 0.60,
     margin: float | None = 0.05,
     one_way_cost_bp: float = 0.5,
-    export_trades_csv: str | None = None,
+    export_trades_csv: str ='trade_output_daily.csv',
+    hold_days: int | None = None,
+    barrier_daily_atr_mult: float | None = None,
 ) -> dict:
-    """
-    Stitch predictions from saved fold models, apply probability threshold,
-    compute PnL, and parse trades.
 
-    Args:
-        data_path: path to CSV (timestamp index or 'timestamp' column)
-        models_dir: directory containing fold_{k}.keras and fold_{k}_feature_order.csv
-        pmin: min prob to act (else abstain = 0)
-        margin: optional min gap between top2 probs
-        one_way_cost_bp: transaction costs per side in bps
-        export_trades_csv: if provided, save trades to this CSV
-
-    Returns:
-        dict with metrics, trade summary, counts, etc.
-    """
     if not os.path.isdir(models_dir):
         raise FileNotFoundError(f"models_dir not found: {models_dir}")
 
@@ -76,14 +73,17 @@ def predict_and_backtest(
 
     files = sorted(keras_files, key=_fold_num)
 
-    # load data & features
+    # Load data + features
     df = load_forex_csv(data_path)
     df_feat = add_basic_features(df)
 
+    print(f"[DATA]  {df.index.min()} → {df.index.max()}  rows={len(df)}")
+    print(f"[FEAT]  {df_feat.index.min()} → {df_feat.index.max()}  rows={len(df_feat)}")
+
     sigs = []
     n = len(df_feat)
-    test_size = 0.2
-    test_n = int(max(n+15000, n ))
+    test_size = 0.00
+    test_n = int(max(1, n ))
     n_folds = len(files)
 
     for f in files:
@@ -92,84 +92,96 @@ def predict_and_backtest(
 
         feat_path = os.path.join(models_dir, f"fold_{fold}_feature_order.csv")
         if not os.path.exists(feat_path):
-            raise FileNotFoundError(
-                f"Missing feature order file for {f}: {feat_path}"
-            )
+            raise FileNotFoundError(f"Missing feature order file for {f}: {feat_path}")
         feature_cols = _load_feature_cols(feat_path)
 
         missing = [c for c in feature_cols if c not in df_feat.columns]
         if missing:
             raise KeyError(
-                "Saved feature columns are missing from df_feat:\n"
-                f"- missing: {missing}\n"
-                f"- df_feat columns (sample): {list(df_feat.columns)[:15]}\n"
-                f"- loaded feature_cols (sample): {feature_cols[:15]}"
+                f"Missing features in df_feat: {missing[:12]} ... "
+                f"\nAvailable: {list(df_feat.columns)[:20]}..."
             )
 
-        # emulate training split (expanding window approx)
         end_train = int((n - test_n) * (fold / n_folds))
         end_train = max(end_train, 1)
         tr = np.arange(0, end_train)
         te = np.arange(end_train, min(end_train + test_n, n))
 
-        # scale on train only
+        if len(te) == 0:
+            continue
+
+        print(f"[FOLD {fold}] test slice: {df_feat.index[te][0]} → {df_feat.index[te][-1]}  (len={len(te)})")
+
         X = df_feat[feature_cols].copy()
         scaler = RollingScaler()
         scaler.fit(X.iloc[tr])
         X_te = scaler.transform(X.iloc[te])
 
-        # predict -> thresholded signals
         prob = model.predict(X_te, verbose=0)
         dir_sig = softmax_to_dir_threshold(prob, pmin=pmin, margin=margin)
         sigs.append(pd.Series(dir_sig, index=df_feat.index[te]))
 
-    # stitch signals, make duplicate-safe and sorted
-    all_sig = pd.concat(sigs)
-    all_sig = all_sig.sort_index()
+    if not sigs:
+        raise RuntimeError("No fold predictions produced; check models and data alignment.")
+
+    all_sig = pd.concat(sigs).sort_index()
     if all_sig.index.has_duplicates:
         all_sig = all_sig[~all_sig.index.duplicated(keep="last")]
 
-    # PnL & trades (these functions also align & de-dup internally)
+    print(f"[SIG]   {all_sig.index.min()} → {all_sig.index.max()}  rows={len(all_sig)}")
+
+    # Convert hold_days → hours for 1h bars
+    hold_hours = None if hold_days is None else int(hold_days * 24)
+
+    # Metrics (latency and de-dupe handled inside)
     metrics = pnl_from_signals(df["close"], all_sig, one_way_cost_bp=one_way_cost_bp)
-    trades_df = trades_from_signals(df["close"], all_sig, one_way_cost_bp=one_way_cost_bp)
-    trades_df.to_csv('trades_df.csv')
-    summary = summarize_trades(trades_df)
+
+    trades_df = trades_from_signals(
+        close=df["close"],
+        signals=all_sig,
+        one_way_cost_bp=one_way_cost_bp,
+        max_hold_hours=hold_hours,
+        high=df.get("high"),
+        low=df.get("low"),
+        entry_barrier_mult=barrier_daily_atr_mult,
+        daily_atr=df_feat.get("atr_d1_14"),
+    )
+
+    print(
+        f"[TRADES] entries: {trades_df['entry_time'].min() if not trades_df.empty else None} "
+        f"→ {trades_df['entry_time'].max() if not trades_df.empty else None} | "
+        f"exits: {trades_df['exit_time'].min() if not trades_df.empty else None} "
+        f"→ {trades_df['exit_time'].max() if not trades_df.empty else None} | "
+        f"n={len(trades_df)}"
+    )
 
     if export_trades_csv:
-        trades_df.to_csv(export_trades_csv, index=False)
+        trades_df.to_csv('daily_export_trades.csv', index=False)
+        print(f"[SAVE] trades → {export_trades_csv}")
 
+    summary = summarize_trades(trades_df)
     return {
         "metrics": metrics,
         "n_preds": int(all_sig.notna().sum()),
         "n_trades": int(len(trades_df)),
         "trade_summary": summary,
-        # "trades": trades_df.to_dict(orient="records"),  # enable if you want raw trades in-memory
     }
 
 
 if __name__ == "__main__":
-    import argparse, os
-    p = argparse.ArgumentParser()
-    p.add_argument("--data", default=os.environ.get("NNQ_DATA", "data/EURUSD_1h_2005-01-01_to_2025-09-23.csv"))
-    p.add_argument("--models_dir", default=os.environ.get("NNQ_MODELS", "models/eurusd_nn"))
-    p.add_argument("--pmin", type=float, default=0.30)
-    p.add_argument("--margin", type=float, default=0.00)
-    p.add_argument("--cost_bp", type=float, default=0.0)
-    p.add_argument("--export_trades_csv", default=None)
-    args = p.parse_args()
-
-    # quick guard so we fail early if files don’t exist
-    if not os.path.exists(args.data):
-        raise FileNotFoundError(f"--data not found: {args.data}")
-    if not os.path.isdir(args.models_dir):
-        raise FileNotFoundError(f"--models_dir not found: {args.models_dir}")
+    if not os.path.exists(DATA_PATH):
+        raise FileNotFoundError(f"--data not found: {DATA_PATH}")
+    if not os.path.isdir(MODELS_DIR):
+        raise FileNotFoundError(f"--models_dir not found: {MODELS_DIR}")
 
     out = predict_and_backtest(
-        data_path=args.data,
-        models_dir=args.models_dir,
-        pmin=args.pmin,
-        margin=args.margin,
-        one_way_cost_bp=args.cost_bp,
-        export_trades_csv=args.export_trades_csv,
+        data_path=DATA_PATH,
+        models_dir=MODELS_DIR,
+        pmin=PMIN,
+        margin=MARGIN,
+        one_way_cost_bp=COST_BP,
+        export_trades_csv=EXPORT_TRADES_CSV,
+        hold_days=HOLD_DAYS,
+        barrier_daily_atr_mult=BARRIER_DATR_MULT,
     )
     print(out)

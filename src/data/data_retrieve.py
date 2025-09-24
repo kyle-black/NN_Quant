@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 
 API_KEY = "NLwwRkkEzJIVdRCiZqUBlIMa4z6M8mH3"
 SYMBOL = "EURUSD"
-BASE = "https://financialmodelingprep.com/stable/historical-chart/1hour"
+BASE = "https://financialmodelingprep.com/stable/historical-price-eod"
 
 START_DATE = "2005-01-01"   # earliest you want
 END_DATE = "2025-09-23"            # None = today; or "2025-09-23"

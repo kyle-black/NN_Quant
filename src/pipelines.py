@@ -3,22 +3,34 @@ import pandas as pd
 from typing import Tuple, Dict
 from sklearn.preprocessing import StandardScaler
 
+# pipelines.py
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+
 class RollingScaler:
     """
-    Fit ONLY on train indices, transform train and test separately.
-    Prevents leakage from future distribution shift.
+    Thin wrapper over StandardScaler that ignores non-numeric columns and
+    preserves column order.
     """
     def __init__(self):
-        self.scaler = None
+        self.scaler = StandardScaler()
+        self.columns_: list[str] = []
 
     def fit(self, X: pd.DataFrame):
-        self.scaler = StandardScaler(with_mean=True, with_std=True)
-        self.scaler.fit(X.values)
+        Xn = X.select_dtypes(include=[np.number]).copy()
+        self.columns_ = list(Xn.columns)
+        self.scaler.fit(Xn.values)
+        return self
 
-    def transform(self, X: pd.DataFrame) -> np.ndarray:
-        if self.scaler is None:
-            raise RuntimeError("Call fit before transform.")
-        return self.scaler.transform(X.values)
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        # align to columns seen in fit; missing become NaN then filled with 0 before scaling
+        Xn = X[self.columns_].copy()
+        Xn = Xn.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        Z = self.scaler.transform(Xn.values)
+        out = pd.DataFrame(Z, index=X.index, columns=self.columns_)
+        return out
+
 
 def build_Xy(df_feat: pd.DataFrame, y: pd.Series, feature_cols=None) -> Tuple[pd.DataFrame, pd.Series]:
     df = df_feat.copy()
