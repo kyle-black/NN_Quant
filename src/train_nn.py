@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any
 from tensorflow import keras
+import tensorflow as tf
 
 from data_io import load_forex_csv
 from features import add_basic_features
@@ -11,6 +12,11 @@ from timesplit import time_series_split
 from pipelines import RollingScaler, build_Xy
 from model_keras import make_classifier
 from labels import make_direction_label_barrier_first_touch_days 
+
+from set_seed_all import seed_everything
+
+SEED = 42
+seed_everything(SEED, deterministic_tf=True)
 
 def train_eurusd(
     data_path: str,
@@ -110,7 +116,7 @@ if __name__ == "__main__":
     thr =0.005
     splits = 5
     test_size = 0.20
-    epochs =500
+    epochs =100
     batch_size= 128
     out = "models/eurusd_nn"
     models_dir="models/eurusd_nn"

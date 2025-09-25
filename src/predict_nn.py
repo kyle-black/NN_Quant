@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 from tensorflow import keras
+import tensorflow as tf
 
 from data_io import load_forex_csv
 from features import add_basic_features
@@ -14,17 +15,22 @@ from backtest import (
     summarize_trades,
 )
 
+from set_seed_all import seed_everything
+
+SEED = 42
+seed_everything(SEED, deterministic_tf=True)
+#tf.random.set_seed(1234)
 # =========================
 # HARD-CODED PARAMETERS
 # =========================
 DATA_PATH   = "data/EURUSD_eod_2000_to_today.csv"   # daily file
 MODELS_DIR  = "models/eurusd_nn"                    # folder with fold_*.keras + fold_*_feature_order.csv
-PMIN        = 0.0                                  # min prob to act
-MARGIN      = 0.10                                 # min edge over 2nd-best class (None to disable)
+PMIN        = 0.00                            # min prob to act
+MARGIN      = 0.01                               # min edge over 2nd-best class (None to disable)
 COST_BP     = 0.0                                   # one-way cost in basis points
 HOLD_DAYS   = 21                                     # None for no time-exit; integer N => N bars if daily, 24*N bars if hourly
 BARRIER_DATR_MULT = 3.0                             # None to disable; else k * daily ATR at entry
-EXPORT_TRADES_CSV = "daily_export_trades.csv"       # trades CSV (set None to skip writing)
+EXPORT_TRADES_CSV = "daily_export_trades_60_Min.csv"       # trades CSV (set None to skip writing)
 # =========================
 
 

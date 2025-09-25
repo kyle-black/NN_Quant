@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
+
 def make_classifier(input_dim: int,
                     hidden: int = 128,
                     dropout: float = 0.2,

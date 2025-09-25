@@ -30,9 +30,10 @@ def softmax_to_dir_threshold(
 
     argmax = probs.argmax(axis=1)
     pmax = probs.max(axis=1)
-
+    print(f'probs {probs}')
     if margin is not None:
         sorted_p = np.sort(probs, axis=1)
+        print(sorted_p)
         gap = sorted_p[:, -1] - sorted_p[:, -2]
         ok = (pmax >= pmin) & (gap >= margin)
     else:
@@ -41,6 +42,7 @@ def softmax_to_dir_threshold(
     map_idx = np.array([-1, 0, +1])
     sig = map_idx[argmax]
     sig[~ok] = 0
+    print(sig)
     return sig
 
 
