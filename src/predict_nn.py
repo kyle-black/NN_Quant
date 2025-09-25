@@ -17,18 +17,23 @@ from backtest import (
 # =========================
 # HARD-CODED PARAMETERS
 # =========================
-DATA_PATH   = "data/EURUSD_eod_2000_to_today.csv"
-MODELS_DIR  = "models/eurusd_nn"        # folder with fold_*.keras + fold_*_feature_order.csv
-PMIN        = 0.00                    # min prob to act
-MARGIN      = 0.01                     # min edge over 2nd-best class (None to disable)
-COST_BP     = 0.0                       # one-way cost in basis points
-HOLD_DAYS   = None                        # None for no time-exit; integer N => force exit after 24*N bars
-BARRIER_DATR_MULT = 1.0                 # None to disable triple-barrier; else k * daily ATR at entry
-EXPORT_TRADES_CSV = "trades_eurusd_pred.csv"  # output trades CSV (set None to skip writing)
+DATA_PATH   = "data/EURUSD_eod_2000_to_today.csv"   # daily file
+MODELS_DIR  = "models/eurusd_nn"                    # folder with fold_*.keras + fold_*_feature_order.csv
+PMIN        = 0.0                                  # min prob to act
+MARGIN      = 0.10                                 # min edge over 2nd-best class (None to disable)
+COST_BP     = 0.0                                   # one-way cost in basis points
+HOLD_DAYS   = 21                                     # None for no time-exit; integer N => N bars if daily, 24*N bars if hourly
+BARRIER_DATR_MULT = 3.0                             # None to disable; else k * daily ATR at entry
+EXPORT_TRADES_CSV = "daily_export_trades.csv"       # trades CSV (set None to skip writing)
 # =========================
 
 
 def _load_feature_cols(feat_path: str) -> list[str]:
+    """
+    Load saved feature order. Supports:
+    - New format: single column with header 'feature'
+    - Old format: headerless single column
+    """
     try:
         return (
             pd.read_csv(feat_path)["feature"]
@@ -47,13 +52,39 @@ def _load_feature_cols(feat_path: str) -> list[str]:
         return fc
 
 
+def _infer_bars_per_day(index: pd.DatetimeIndex) -> int:
+        """
+        Infer how many bars per calendar day to convert HOLD_DAYS -> bars.
+        Returns 1 for daily, 24 for hourly; falls back conservatively.
+        """
+        # Try pandas' inference first
+        freq = pd.infer_freq(index)
+        if freq:
+            f = freq.upper()
+            if "D" in f:
+                return 1
+            if "H" in f:
+                return 24
+        # Heuristic fallback: compare median spacing
+        if len(index) >= 3:
+            dt = index.to_series().diff().median()
+            # ~1 day
+            if pd.Timedelta(hours=12) < dt < pd.Timedelta(days=2):
+                return 1
+            # ~1 hour
+            if pd.Timedelta(minutes=30) < dt < pd.Timedelta(hours=2):
+                return 24
+        # Default
+        return 24
+
+
 def predict_and_backtest(
     data_path: str,
     models_dir: str,
     pmin: float = 0.60,
     margin: float | None = 0.05,
     one_way_cost_bp: float = 0.5,
-    export_trades_csv: str ='trade_output_daily.csv',
+    export_trades_csv: str | None = None,
     hold_days: int | None = None,
     barrier_daily_atr_mult: float | None = None,
 ) -> dict:
@@ -80,11 +111,26 @@ def predict_and_backtest(
     print(f"[DATA]  {df.index.min()} → {df.index.max()}  rows={len(df)}")
     print(f"[FEAT]  {df_feat.index.min()} → {df_feat.index.max()}  rows={len(df_feat)}")
 
-    sigs = []
+    # Proper OOS split size (e.g., 20% tail per fold)
     n = len(df_feat)
-    test_size = 0.00
-    test_n = int(max(1, n ))
+    test_size = 0.20
+    test_n = int(max(1, n * test_size))
     n_folds = len(files)
+
+    # Convert hold_days -> bars (auto daily vs hourly)
+    if hold_days is not None:
+        bars_per_day = _infer_bars_per_day(df_feat.index)
+        hold_bars = int(hold_days * bars_per_day)
+        print(f"[EXIT] HOLD_DAYS={hold_days} → bars_per_day={bars_per_day} → max_hold_bars={hold_bars}")
+    else:
+        hold_bars = None
+
+    # Safety: only use barrier if daily ATR is present
+    if barrier_daily_atr_mult is not None and "atr_d1_14" not in df_feat.columns:
+        print("[WARN] barrier_daily_atr_mult set but 'atr_d1_14' not in features; disabling barrier exits.")
+        barrier_daily_atr_mult = None
+
+    sigs = []
 
     for f in files:
         fold = _fold_num(f)
@@ -102,19 +148,22 @@ def predict_and_backtest(
                 f"\nAvailable: {list(df_feat.columns)[:20]}..."
             )
 
+        # Expanding-window style: each fold gets the same size tail, different start
         end_train = int((n - test_n) * (fold / n_folds))
         end_train = max(end_train, 1)
         tr = np.arange(0, end_train)
         te = np.arange(end_train, min(end_train + test_n, n))
 
-        if len(te) == 0:
+        if len(te) == 0 or len(tr) < 10:
+            # Skip pathological fold (too small train)
+            print(f"[FOLD {fold}] skipped (train too small or no test).")
             continue
 
         print(f"[FOLD {fold}] test slice: {df_feat.index[te][0]} → {df_feat.index[te][-1]}  (len={len(te)})")
 
         X = df_feat[feature_cols].copy()
         scaler = RollingScaler()
-        scaler.fit(X.iloc[tr])
+        scaler.fit(X.iloc[tr])            # fit scaler on train only
         X_te = scaler.transform(X.iloc[te])
 
         prob = model.predict(X_te, verbose=0)
@@ -130,17 +179,14 @@ def predict_and_backtest(
 
     print(f"[SIG]   {all_sig.index.min()} → {all_sig.index.max()}  rows={len(all_sig)}")
 
-    # Convert hold_days → hours for 1h bars
-    hold_hours = None if hold_days is None else int(hold_days * 24)
-
-    # Metrics (latency and de-dupe handled inside)
+    # Compute metrics (these functions handle 1-bar latency internally)
     metrics = pnl_from_signals(df["close"], all_sig, one_way_cost_bp=one_way_cost_bp)
 
     trades_df = trades_from_signals(
         close=df["close"],
         signals=all_sig,
         one_way_cost_bp=one_way_cost_bp,
-        max_hold_hours=hold_hours,
+        max_hold_bars=hold_bars,                 # <<< now bars, not hours
         high=df.get("high"),
         low=df.get("low"),
         entry_barrier_mult=barrier_daily_atr_mult,
@@ -156,7 +202,7 @@ def predict_and_backtest(
     )
 
     if export_trades_csv:
-        trades_df.to_csv('daily_export_trades.csv', index=False)
+        trades_df.to_csv(export_trades_csv, index=False)
         print(f"[SAVE] trades → {export_trades_csv}")
 
     summary = summarize_trades(trades_df)

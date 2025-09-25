@@ -86,7 +86,7 @@ def trades_from_signals(
     close: pd.Series,
     signals: pd.Series,
     one_way_cost_bp: float = 0.5,
-    max_hold_hours: int | None = None,        # NEW: time exit in hours (1 bar = 1h)
+    max_hold_bars: int | None = None,        # NEW: time exit in hours (1 bar = 1h)
     high: pd.Series | None = None,            # for barrier exits
     low: pd.Series | None = None,
     entry_barrier_mult: float | None = None,  # if set with daily_atr, use triple barrier
@@ -144,7 +144,7 @@ def trades_from_signals(
         # manage open position
         if cur != 0:
             flip_exit = (s != cur)
-            time_exit = (max_hold_hours is not None and entry_i is not None and (i - entry_i) >= max_hold_hours)
+            time_exit = (max_hold_bars is not None and entry_i is not None and (i - entry_i) >= max_hold_bars)
 
             barrier_exit = False
             if entry_barrier_mult is not None and daily_atr is not None and high is not None and low is not None:
