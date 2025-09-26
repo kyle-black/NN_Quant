@@ -20,3 +20,14 @@ macd_signal
 macd_hist
 atr_14
 atr_d1_14
+willr_14
+bb_mid_20
+bb_up_20_2
+bb_dn_20_2
+bb_pctb_20_2
+bb_bw_20_2
+natr_14
+ppo
+ppo_signal
+ppo_hist
+cci_20

@@ -35,7 +35,7 @@ def train_eurusd(
    # y = make_direction_label(df_feat, horizon=horizon, thr=thr)
    # y = make_direction_label_barrier_first_touch_days(df_feat, atr_mult=0.5, atr_col="atr_14")  # or "ATR_14")
     y = make_direction_label_barrier_first_touch_days(
-    df_feat, days_ahead=21, atr_mult=3.0, use_daily_atr=True
+    df_feat, days_ahead=30, atr_mult=4.0, use_daily_atr=True
 )
     X, y = build_Xy(df_feat, y)
 
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     '''
 
     data_path='data/EURUSD_eod_2000_to_today.csv'
-    horizon = 21
+    horizon = 30
     thr =0.005
     splits = 5
     test_size = 0.20
