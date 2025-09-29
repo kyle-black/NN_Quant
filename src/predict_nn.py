@@ -16,12 +16,13 @@ from backtest import (
     trades_from_signals,
     summarize_trades,
     pnl_timeseries,
+    pnl_from_trades
 )
 
 # ---------------------------------------------------------------------
 # Determinism
 # ---------------------------------------------------------------------
-SEED = 42
+SEED = 47
 seed_everything(SEED, deterministic_tf=True)
 
 # =========================
@@ -32,21 +33,21 @@ MODELS_DIR  = "models/eurusd_nn"                    # contains fold_*.keras + fo
 
 # Decision rule (Long–Short gap)
 PMIN_LS     = 0.0   # min(max(pL,pS)) to consider trading
-GAP         = 0.20   # required |pL - pS|
+GAP         = 0.05   # required |pL - pS|
 
 # Costs / exits
 COST_BP     = 0.0
 HOLD_DAYS   = 30      # N bars if daily, 24*N if hourly
 
 # Barrier sizing
-BASE_K      = 4.0    # base ATR multiple (daily ATR)
+BASE_K      = 2  # base ATR multiple (daily ATR)
 K_MIN       = 0.75
-K_MAX       = 3.0
+K_MAX       = 2.0
 USE_CONFIDENCE_SCALED_BARRIER = False  # if True, scale k by L–S confidence
 
 # Outputs
-EXPORT_TRADES_CSV = "daily_export_trades.csv"
-DAILY_PNL_CSV     = "daily_pnl_timeseries.csv"
+EXPORT_TRADES_CSV = "daily_export_trades_10.csv"
+DAILY_PNL_CSV     = "daily_pnl_timeseries_10.csv"
 # =========================
 
 
@@ -234,6 +235,18 @@ def predict_and_backtest(
     print(f"[SAVE] daily PnL → {DAILY_PNL_CSV}")
 
     summary = summarize_trades(trades_df)
+
+    trades_pnl = pnl_from_trades(
+        trades_df=trades_df,
+        close=df['close'],
+        start_equity= 1.0,)
+    
+    trades_pnl.to_csv('trades_pnl_10.csv')
+
+
+
+
+
     return {
         "metrics": metrics,
         "n_preds": int(all_sig.notna().sum()),
@@ -241,6 +254,14 @@ def predict_and_backtest(
         "trade_summary": summary,
         "daily_pnl_csv": DAILY_PNL_CSV,
     }
+
+ 
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

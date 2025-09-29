@@ -15,7 +15,7 @@ from labels import make_direction_label_barrier_first_touch_days
 
 from set_seed_all import seed_everything
 
-SEED = 42
+SEED = 47
 seed_everything(SEED, deterministic_tf=True)
 
 def train_eurusd(
@@ -35,7 +35,7 @@ def train_eurusd(
    # y = make_direction_label(df_feat, horizon=horizon, thr=thr)
    # y = make_direction_label_barrier_first_touch_days(df_feat, atr_mult=0.5, atr_col="atr_14")  # or "ATR_14")
     y = make_direction_label_barrier_first_touch_days(
-    df_feat, days_ahead=30, atr_mult=4.0, use_daily_atr=True
+    df_feat, days_ahead=30, atr_mult=2, use_daily_atr=True
 )
     X, y = build_Xy(df_feat, y)
 

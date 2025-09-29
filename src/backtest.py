@@ -176,6 +176,88 @@ def pnl_timeseries(
     return df
 
 
+def pnl_from_trades(
+    trades_df: pd.DataFrame,
+    close: pd.Series,
+    start_equity: float = 1.0
+) -> pd.DataFrame:
+    """
+    Mark-to-market daily equity built from trades.
+    - Uses close-to-close returns while a trade is open.
+    - Ensures each trade's compounded path matches trades_df['net_ret'] by
+      applying a multiplicative adjustment on the trade's exit day.
+    Assumes trades_df has: ['side','entry_time','exit_time','net_ret'].
+    """
+
+    # Basic guards / alignment
+    idx = close.index
+    close = close.astype(float).reindex(idx).dropna()
+    ret = close.pct_change().fillna(0.0)  # ret_t = (close_t / close_{t-1} - 1)
+
+    if trades_df is None or trades_df.empty:
+        equity = pd.Series(start_equity, index=idx, name="equity")
+        out = pd.DataFrame({"equity": equity})
+        out["ret_net"] = out["equity"].pct_change().fillna(0.0)
+        out["drawdown"] = out["equity"] / out["equity"].cummax() - 1.0
+        return out
+
+    # Position series: position at bar t applies to ret_t (movement into t)
+    pos = pd.Series(0, index=idx, dtype=int)
+
+    # Adjustment multipliers (all ones), tweaked only on exit days
+    adj = pd.Series(1.0, index=idx, dtype=float)
+
+    tr = trades_df.sort_values(["entry_time", "exit_time"]).copy()
+
+    for _, r in tr.iterrows():
+        side = int(r["side"])
+        et   = r["entry_time"]
+        xt   = r["exit_time"]
+        net  = float(r["net_ret"])
+
+        # Must have both times on index to attribute daily PnL cleanly
+        if et not in idx or xt not in idx:
+            # If timestamps are missing, skip or handle with nearest/asof as desired.
+            # For safety, skip here.
+            continue
+
+        # If we enter at the close of et, the first PnL accrues on ret at (et -> et+1),
+        # which is ret indexed by the next timestamp after et.
+        i_et = idx.get_loc(et)
+        i_xt = idx.get_loc(xt)
+
+        # If exit is same bar as entry, no daily returns accrue; just step the equity.
+        if i_xt <= i_et:
+            adj.iloc[i_xt] *= (1.0 + net)
+            continue
+
+        # Hold from (i_et+1 ... i_xt) inclusive of exit day’s return
+        hold_slice = slice(i_et + 1, i_xt)
+        pos.iloc[hold_slice] = side
+
+        # Compounded gross path over the holding window (without costs)
+        gross_path = float((1.0 + side * ret.iloc[hold_slice]).prod())
+        if not np.isfinite(gross_path) or gross_path == 0.0:
+            # Degenerate case: apply all performance on exit
+            adj.iloc[i_xt] *= (1.0 + net)
+        else:
+            # Choose an adjustment so that: gross_path * adj_exit = (1 + net_ret)
+            adj_needed = (1.0 + net) / gross_path
+            # Apply the adjustment on the exit bar
+            adj.iloc[i_xt] *= adj_needed
+
+    # Daily multiplicative series = (1 + pos * ret) * adj (adj is 1 except on exits)
+    daily_mult = (1.0 + pos * ret) * adj
+    equity = (start_equity * daily_mult.cumprod()).rename("equity")
+
+    out = pd.DataFrame({"equity": equity})
+    out["ret_net"] = out["equity"].pct_change().fillna(0.0)
+    out["drawdown"] = out["equity"] / out["equity"].cummax() - 1.0
+    return out
+
+
+
+
 # -----------------------------
 # Trades parsing
 # -----------------------------
@@ -259,7 +341,7 @@ def trades_from_signals(
         # if in position, check exits
         if in_pos != 0 and entry_i is not None:
             hold += 1
-
+            '''
             # Exit condition 1: opposite or flat signal (position flip)
             if s == 0 or np.sign(s) != np.sign(in_pos):
                 trades.append({
@@ -278,7 +360,7 @@ def trades_from_signals(
                 in_pos = 0
                 entry_i = None
                 continue
-
+            '''
             # Exit condition 2: barrier touch (need high/low & atr)
             if entry_barrier is not None and high is not None and low is not None:
                 hi = float(high.loc[i])
