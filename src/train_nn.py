@@ -116,8 +116,8 @@ if __name__ == "__main__":
     thr =0.005
     splits = 5
     test_size = 0.20
-    epochs =100
-    batch_size= 128
+    epochs =1000
+    batch_size= 256
     out = "models/eurusd_nn"
     models_dir="models/eurusd_nn"
     

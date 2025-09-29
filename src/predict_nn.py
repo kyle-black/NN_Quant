@@ -33,7 +33,7 @@ MODELS_DIR  = "models/eurusd_nn"                    # contains fold_*.keras + fo
 
 # Decision rule (Long–Short gap)
 PMIN_LS     = 0.0   # min(max(pL,pS)) to consider trading
-GAP         = 0.05   # required |pL - pS|
+GAP         = 0.10   # required |pL - pS|
 
 # Costs / exits
 COST_BP     = 0.0
